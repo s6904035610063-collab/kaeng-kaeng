@@ -13,7 +13,7 @@ export default function OrderPage({ params }) {
   const [cart, setCart] = useState([]);
   const [note, setNote] = useState("");
 
-  // จำนวนผู้ใหญ่และเด็ก
+  // จำนวนคน
   const [adults, setAdults] = useState(1);
   const [children, setChildren] = useState(0);
 
@@ -21,18 +21,28 @@ export default function OrderPage({ params }) {
   const [sending, setSending] = useState(false);
   const [success, setSuccess] = useState(false);
 
-  // โหลดเมนู
+  // โหลดหมวดหมู่และเมนู
   useEffect(() => {
     async function loadMenu() {
-      const { data: categoryData } = await supabase
-        .from("menu_categories")
-        .select("*")
-        .order("sort_order", { ascending: true });
+      const { data: categoryData, error: categoryError } =
+        await supabase
+          .from("menu_categories")
+          .select("*")
+          .order("sort_order", { ascending: true });
 
-      const { data: itemData } = await supabase
-        .from("menu_items")
-        .select("*")
-        .order("id", { ascending: true });
+      const { data: itemData, error: itemError } =
+        await supabase
+          .from("menu_items")
+          .select("*")
+          .order("id", { ascending: true });
+
+      if (categoryError) {
+        console.error(categoryError);
+      }
+
+      if (itemError) {
+        console.error(itemError);
+      }
 
       setCategories(categoryData || []);
       setMenuItems(itemData || []);
@@ -47,16 +57,21 @@ export default function OrderPage({ params }) {
     loadMenu();
   }, []);
 
-  // เพิ่มสินค้า
+  // เพิ่มอาหาร
   function addToCart(item) {
     setCart((current) => {
-      const existing = current.find((x) => x.id === item.id);
+      const existing = current.find(
+        (cartItem) => cartItem.id === item.id
+      );
 
       if (existing) {
-        return current.map((x) =>
-          x.id === item.id
-            ? { ...x, quantity: x.quantity + 1 }
-            : x
+        return current.map((cartItem) =>
+          cartItem.id === item.id
+            ? {
+                ...cartItem,
+                quantity: cartItem.quantity + 1,
+              }
+            : cartItem
         );
       }
 
@@ -70,31 +85,37 @@ export default function OrderPage({ params }) {
     });
   }
 
-  // ลดสินค้า
+  // เพิ่มจำนวนอาหาร
+  function increaseItem(id) {
+    setCart((current) =>
+      current.map((item) =>
+        item.id === id
+          ? {
+              ...item,
+              quantity: item.quantity + 1,
+            }
+          : item
+      )
+    );
+  }
+
+  // ลดจำนวนอาหาร
   function decreaseItem(id) {
     setCart((current) =>
       current
         .map((item) =>
           item.id === id
-            ? { ...item, quantity: item.quantity - 1 }
+            ? {
+                ...item,
+                quantity: item.quantity - 1,
+              }
             : item
         )
         .filter((item) => item.quantity > 0)
     );
   }
 
-  // เพิ่มจำนวนสินค้า
-  function increaseItem(id) {
-    setCart((current) =>
-      current.map((item) =>
-        item.id === id
-          ? { ...item, quantity: item.quantity + 1 }
-          : item
-      )
-    );
-  }
-
-  // จำนวนรายการทั้งหมด
+  // จำนวนรายการ
   const totalItems = cart.reduce(
     (sum, item) => sum + item.quantity,
     0
@@ -102,19 +123,20 @@ export default function OrderPage({ params }) {
 
   // ราคารวม
   const total = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
+    (sum, item) =>
+      sum + item.price * item.quantity,
     0
   );
 
   // ส่งออเดอร์
   async function submitOrder() {
-    if (cart.length === 0) {
-      alert("กรุณาเลือกอาหารก่อนสั่ง");
+    if (adults + children <= 0) {
+      alert("กรุณาระบุจำนวนผู้ใหญ่หรือเด็ก");
       return;
     }
 
-    if (adults + children <= 0) {
-      alert("กรุณาระบุจำนวนผู้ใหญ่หรือเด็ก");
+    if (cart.length === 0) {
+      alert("กรุณาเลือกอาหารก่อนสั่ง");
       return;
     }
 
@@ -122,26 +144,29 @@ export default function OrderPage({ params }) {
 
     try {
       // สร้าง session
-      const { data: session, error: sessionError } = await supabase
-        .from("sessions")
-        .insert({
-          table_number: table,
-          order_note: note,
-          adults: adults,
-          children: children,
-          status: "active",
-        })
-        .select()
-        .single();
+      const { data: session, error: sessionError } =
+        await supabase
+          .from("sessions")
+          .insert({
+            table_number: table,
+            order_note: note,
+            adults: adults,
+            children: children,
+            status: "active",
+          })
+          .select()
+          .single();
 
       if (sessionError) {
         console.error(sessionError);
-        alert("ไม่สามารถสร้างรายการสั่งอาหารได้");
+        alert(
+          "สร้างรายการไม่สำเร็จ กรุณาตรวจสอบ Supabase"
+        );
         setSending(false);
         return;
       }
 
-      // เตรียมข้อมูลสินค้า
+      // เตรียมรายการอาหาร
       const orderItems = cart.map((item) => ({
         id: item.id,
         name: item.name,
@@ -162,7 +187,7 @@ export default function OrderPage({ params }) {
 
       if (orderError) {
         console.error(orderError);
-        alert("ไม่สามารถส่งออเดอร์ได้");
+        alert("ส่งออเดอร์ไม่สำเร็จ");
         setSending(false);
         return;
       }
@@ -188,24 +213,32 @@ export default function OrderPage({ params }) {
     );
   }
 
-  // หน้าหลังสั่งสำเร็จ
+  // หลังสั่งอาหารสำเร็จ
   if (success) {
     return (
       <main className="page">
         <div className="success-card">
-          <div className="success-icon">✅</div>
+          <div className="success-icon">
+            ✅
+          </div>
 
           <h1>สั่งอาหารสำเร็จ!</h1>
 
-          <p>
-            โต๊ะ {table}
-          </p>
+          <p>โต๊ะ {table}</p>
 
-          <p>
+          <div
+            style={{
+              marginTop: "15px",
+              marginBottom: "15px",
+              fontSize: "18px",
+            }}
+          >
             👨 ผู้ใหญ่ {adults} คน
-            {" / "}
+            <br />
             👶 เด็ก {children} คน
-          </p>
+            <br />
+            👨‍👩‍👧 รวม {adults + children} คน
+          </div>
 
           <p>ร้านกำลังเตรียมอาหารให้ค่ะ</p>
 
@@ -221,15 +254,16 @@ export default function OrderPage({ params }) {
   }
 
   const filteredItems = menuItems.filter(
-    (item) => item.category_id === activeCategory
+    (item) =>
+      item.category_id === activeCategory
   );
 
   return (
-    <main className="page order-page">
+    <main className="page">
       <div className="order-container">
 
-        {/* Header */}
-        <header className="order-header">
+        {/* หัวเว็บ */}
+        <div className="order-header">
           <div>
             <h1>🍛 ข้าวแกงบ้านเรา</h1>
             <p>อร่อยเหมือนกินข้าวที่บ้าน</p>
@@ -238,22 +272,26 @@ export default function OrderPage({ params }) {
           <div className="table-number">
             โต๊ะ {table}
           </div>
-        </header>
+        </div>
 
-        {/* จำนวนคน */}
-        <section className="people-card">
+        {/* จำนวนผู้ใหญ่ / เด็ก */}
+        <div className="people-card">
           <h2>👨‍👩‍👧 จำนวนผู้ใช้บริการ</h2>
 
           <div className="people-grid">
 
-            <div className="people-input">
-              <label>👨 ผู้ใหญ่</label>
+            <div className="people-box">
+              <div className="people-title">
+                👨 ผู้ใหญ่
+              </div>
 
               <div className="number-control">
                 <button
                   type="button"
                   onClick={() =>
-                    setAdults(Math.max(0, adults - 1))
+                    setAdults(
+                      Math.max(0, adults - 1)
+                    )
                   }
                 >
                   −
@@ -270,16 +308,22 @@ export default function OrderPage({ params }) {
                   +
                 </button>
               </div>
+
+              <small>คน</small>
             </div>
 
-            <div className="people-input">
-              <label>👶 เด็ก</label>
+            <div className="people-box">
+              <div className="people-title">
+                👶 เด็ก
+              </div>
 
               <div className="number-control">
                 <button
                   type="button"
                   onClick={() =>
-                    setChildren(Math.max(0, children - 1))
+                    setChildren(
+                      Math.max(0, children - 1)
+                    )
                   }
                 >
                   −
@@ -296,14 +340,20 @@ export default function OrderPage({ params }) {
                   +
                 </button>
               </div>
+
+              <small>คน</small>
             </div>
 
           </div>
 
-          <p className="people-total">
-            รวมทั้งหมด {adults + children} คน
-          </p>
-        </section>
+          <div className="people-total">
+            รวมทั้งหมด{" "}
+            <strong>
+              {adults + children}
+            </strong>{" "}
+            คน
+          </div>
+        </div>
 
         {/* หมวดหมู่ */}
         <div className="category-list">
@@ -328,14 +378,16 @@ export default function OrderPage({ params }) {
         <section className="menu-section">
           <h2>
             {categories.find(
-              (c) => c.id === activeCategory
+              (category) =>
+                category.id === activeCategory
             )?.name || "เมนู"}
           </h2>
 
           <div className="menu-grid">
             {filteredItems.map((item) => {
               const cartItem = cart.find(
-                (x) => x.id === item.id
+                (cartItem) =>
+                  cartItem.id === item.id
               );
 
               return (
@@ -410,7 +462,10 @@ export default function OrderPage({ params }) {
                     key={item.id}
                   >
                     <div>
-                      <strong>{item.name}</strong>
+                      <strong>
+                        {item.name}
+                      </strong>
+
                       <p>
                         {item.price} ×{" "}
                         {item.quantity}
@@ -418,7 +473,9 @@ export default function OrderPage({ params }) {
                     </div>
 
                     <div className="cart-price">
-                      {item.price * item.quantity} บาท
+                      {item.price *
+                        item.quantity}{" "}
+                      บาท
                     </div>
                   </div>
                 ))}
@@ -433,7 +490,7 @@ export default function OrderPage({ params }) {
                 }
               />
 
-              {/* สรุป */}
+              {/* รวมราคา */}
               <div className="total">
                 <span>
                   รวม {totalItems} รายการ
@@ -444,6 +501,7 @@ export default function OrderPage({ params }) {
                 </strong>
               </div>
 
+              {/* ปุ่มสั่ง */}
               <button
                 className="order-button"
                 onClick={submitOrder}
