@@ -7,11 +7,34 @@ export default function KitchenPage() {
   const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  async function loadOrders() {
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        *,
+        sessions (
+          adults,
+          children,
+          order_note
+        )
+      `)
+      .neq("status", "served")
+      .order("created_at", { ascending: true });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    setOrders(data || []);
+    setLoading(false);
+  }
+
   useEffect(() => {
     loadOrders();
 
     const channel = supabase
-      .channel("orders-kitchen")
+      .channel("kitchen-orders")
       .on(
         "postgres_changes",
         {
@@ -30,24 +53,6 @@ export default function KitchenPage() {
     };
   }, []);
 
-  async function loadOrders() {
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .neq("status", "served")
-      .order("created_at", {
-        ascending: true,
-      });
-
-    if (error) {
-      console.error(error);
-      return;
-    }
-
-    setOrders(data || []);
-    setLoading(false);
-  }
-
   async function updateStatus(id, status) {
     const { error } = await supabase
       .from("orders")
@@ -56,125 +61,205 @@ export default function KitchenPage() {
 
     if (error) {
       console.error(error);
-      alert("เปลี่ยนสถานะไม่สำเร็จ");
+      alert("ไม่สามารถเปลี่ยนสถานะได้");
+      return;
     }
+
+    loadOrders();
   }
 
-  function statusText(status) {
-    if (status === "received") return "รับออเดอร์";
+  function getStatusText(status) {
+    if (status === "received") return "รับออเดอร์แล้ว";
     if (status === "cooking") return "กำลังทำ";
     if (status === "served") return "เสิร์ฟแล้ว";
 
     return status;
   }
 
-  function formatTime(date) {
-    return new Date(date).toLocaleTimeString("th-TH", {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+  function getStatusClass(status) {
+    if (status === "received") return "status-received";
+    if (status === "cooking") return "status-cooking";
+    if (status === "served") return "status-served";
+
+    return "";
   }
 
   if (loading) {
     return (
       <main className="page">
-        <div className="loading">กำลังโหลดออเดอร์...</div>
+        <div className="card">
+          <h2>กำลังโหลดออเดอร์...</h2>
+        </div>
       </main>
     );
   }
 
   return (
-    <main className="kitchen-page">
-      <header className="kitchen-header">
-        <div>
-          <h1>👨‍🍳 ห้องครัว</h1>
-          <p>ข้าวแกงบ้านเรา</p>
-        </div>
+    <main className="page kitchen-page">
+      <div className="kitchen-container">
 
-        <button
-          className="refresh-button"
-          onClick={loadOrders}
-        >
-          ↻ รีเฟรช
-        </button>
-      </header>
+        <header className="kitchen-header">
+          <div>
+            <h1>👨‍🍳 หน้าครัว</h1>
+            <p>ข้าวแกงบ้านเรา</p>
+          </div>
 
-      {orders.length === 0 ? (
-        <div className="empty-kitchen">
-          <div>🍽️</div>
-          <h2>ยังไม่มีออเดอร์</h2>
-          <p>รอออเดอร์ใหม่จากลูกค้า</p>
-        </div>
-      ) : (
-        <div className="orders-grid">
-          {orders.map((order) => (
-            <div
-              className={`order-card ${order.status}`}
-              key={order.id}
-            >
-              <div className="order-top">
-                <div>
-                  <h2>โต๊ะ {order.table_number}</h2>
-                  <span>
-                    {formatTime(order.created_at)}
-                  </span>
-                </div>
+          <div className="order-count">
+            {orders.length} ออเดอร์
+          </div>
+        </header>
 
-                <span className="status">
-                  {statusText(order.status)}
-                </span>
-              </div>
+        {orders.length === 0 ? (
+          <div className="empty-kitchen">
+            <div>🍛</div>
+            <h2>ยังไม่มีออเดอร์</h2>
+            <p>เมื่อมีลูกค้าสั่งอาหาร ออเดอร์จะแสดงที่นี่</p>
+          </div>
+        ) : (
+          <div className="kitchen-orders">
 
-              <div className="order-items">
-                {order.items?.map((item, index) => (
-                  <div
-                    className="kitchen-item"
-                    key={index}
-                  >
+            {orders.map((order) => {
+              const session = order.sessions;
+
+              return (
+                <div
+                  className="kitchen-order-card"
+                  key={order.id}
+                >
+
+                  {/* หัวออเดอร์ */}
+                  <div className="kitchen-order-header">
+                    <div>
+                      <h2>
+                        🪑 โต๊ะ {order.table_number}
+                      </h2>
+
+                      <p>
+                        {new Date(
+                          order.created_at
+                        ).toLocaleTimeString("th-TH", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </p>
+                    </div>
+
+                    <span
+                      className={`order-status ${getStatusClass(
+                        order.status
+                      )}`}
+                    >
+                      {getStatusText(order.status)}
+                    </span>
+                  </div>
+
+                  {/* จำนวนคน */}
+                  <div className="customer-count">
                     <span>
-                      {item.name} × {item.quantity}
+                      👨 ผู้ใหญ่{" "}
+                      <strong>
+                        {session?.adults || 0}
+                      </strong>{" "}
+                      คน
                     </span>
 
+                    <span>
+                      👶 เด็ก{" "}
+                      <strong>
+                        {session?.children || 0}
+                      </strong>{" "}
+                      คน
+                    </span>
+
+                    <span>
+                      👨‍👩‍👧 รวม{" "}
+                      <strong>
+                        {(session?.adults || 0) +
+                          (session?.children || 0)}
+                      </strong>{" "}
+                      คน
+                    </span>
+                  </div>
+
+                  {/* รายการอาหาร */}
+                  <div className="kitchen-items">
+                    {Array.isArray(order.items) &&
+                      order.items.map((item, index) => (
+                        <div
+                          className="kitchen-item"
+                          key={index}
+                        >
+                          <div>
+                            <strong>
+                              {item.name}
+                            </strong>
+                          </div>
+
+                          <span>
+                            × {item.quantity}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+
+                  {/* หมายเหตุ */}
+                  {session?.order_note && (
+                    <div className="kitchen-note">
+                      📝 หมายเหตุ:{" "}
+                      {session.order_note}
+                    </div>
+                  )}
+
+                  {/* ราคารวม */}
+                  <div className="kitchen-total">
+                    <span>รวมทั้งหมด</span>
+
                     <strong>
-                      {Number(item.price) *
-                        Number(item.quantity)}{" "}
-                      บาท
+                      {order.total} บาท
                     </strong>
                   </div>
-                ))}
-              </div>
 
-              {order.total && (
-                <div className="order-total">
-                  รวม {order.total} บาท
+                  {/* ปุ่มเปลี่ยนสถานะ */}
+                  <div className="kitchen-actions">
+
+                    {order.status === "received" && (
+                      <button
+                        className="cook-button"
+                        onClick={() =>
+                          updateStatus(
+                            order.id,
+                            "cooking"
+                          )
+                        }
+                      >
+                        👨‍🍳 เริ่มทำอาหาร
+                      </button>
+                    )}
+
+                    {order.status === "cooking" && (
+                      <button
+                        className="serve-button"
+                        onClick={() =>
+                          updateStatus(
+                            order.id,
+                            "served"
+                          )
+                        }
+                      >
+                        ✅ เสิร์ฟแล้ว
+                      </button>
+                    )}
+
+                  </div>
+
                 </div>
-              )}
+              );
+            })}
 
-              <div className="kitchen-actions">
-                {order.status === "received" && (
-                  <button
-                    onClick={() =>
-                      updateStatus(order.id, "cooking")
-                    }
-                  >
-                    👨‍🍳 เริ่มทำอาหาร
-                  </button>
-                )}
+          </div>
+        )}
 
-                {order.status === "cooking" && (
-                  <button
-                    onClick={() =>
-                      updateStatus(order.id, "served")
-                    }
-                  >
-                    ✓ เสิร์ฟแล้ว
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+      </div>
     </main>
   );
 }
